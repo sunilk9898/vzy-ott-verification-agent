@@ -90,9 +90,6 @@ export default function LoginPage() {
           </button>
         </form>
 
-        <p className="text-center text-xs text-gray-600">
-          Default: admin@dishtv.in / admin123 &middot; RBAC: Admin, DevOps, Dev, Exec
-        </p>
       </div>
     </div>
   );
