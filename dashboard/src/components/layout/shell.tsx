@@ -10,33 +10,26 @@ import { connect, disconnect, onScanComplete, onScanError } from "@/lib/websocke
 import { cn } from "@/lib/utils";
 
 export function Shell({ children }: { children: React.ReactNode }) {
+  // ---- ALL hooks MUST be called before any conditional return ----
   const { sidebarCollapsed } = useUIStore();
   const { target, setReport, setLoading, setError } = useReportStore();
   const { token } = useAuthStore();
+  const { completeScan, setActiveScan } = useScanStore();
   const pathname = usePathname();
   const router = useRouter();
 
-  // Client-side auth guard (middleware doesn't work in static export)
   const isLoginPage = pathname === "/login";
+
+  // Client-side auth guard (middleware doesn't work in static export)
   useEffect(() => {
     if (!token && !isLoginPage) {
       router.replace("/login");
     }
   }, [token, isLoginPage, router]);
 
-  // If on login page, render children directly (no sidebar/header)
-  if (isLoginPage) {
-    return <>{children}</>;
-  }
-
-  // If no token and not on login page, show nothing while redirecting
-  if (!token) {
-    return null;
-  }
-
-  // Load latest report when target changes
+  // Load latest report when target changes (only when authenticated)
   useEffect(() => {
-    if (!target) return;
+    if (!token || isLoginPage || !target) return;
     let cancelled = false;
 
     setLoading(true);
@@ -49,22 +42,20 @@ export function Shell({ children }: { children: React.ReactNode }) {
       });
 
     return () => { cancelled = true; };
-  }, [target, setReport, setLoading, setError]);
+  }, [token, isLoginPage, target, setReport, setLoading, setError]);
 
-  const { completeScan, setActiveScan } = useScanStore();
-
-  // Connect WebSocket on mount
+  // Connect WebSocket on mount (only when authenticated)
   useEffect(() => {
+    if (!token || isLoginPage) return;
+
     const socket = connect();
     const unsubComplete = onScanComplete((data) => {
-      // Clear scan state and refresh report
       completeScan(data.scanId, data.score, data.status);
       if (target) {
         getLatestReport(target).then(setReport).catch(() => {});
       }
     });
     const unsubError = onScanError((data) => {
-      // Clear scan state on error
       setActiveScan(null);
     });
 
@@ -73,7 +64,19 @@ export function Shell({ children }: { children: React.ReactNode }) {
       unsubError();
       disconnect();
     };
-  }, [target, setReport, completeScan, setActiveScan]);
+  }, [token, isLoginPage, target, setReport, completeScan, setActiveScan]);
+
+  // ---- Conditional returns AFTER all hooks ----
+
+  // If on login page, render children directly (no sidebar/header)
+  if (isLoginPage) {
+    return <>{children}</>;
+  }
+
+  // If no token and not on login page, show nothing while redirecting
+  if (!token) {
+    return null;
+  }
 
   return (
     <div className="min-h-screen bg-surface-0">
