@@ -12,14 +12,22 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { Pool } from 'pg';
 import { Logger } from '../utils/logger';
-import { ResultStore } from '../store/result-store';
-import { Orchestrator } from '../orchestrator';
+
+// ---------------------------------------------------------------------------
+// Lazy-load heavy modules (Puppeteer, Lighthouse, etc.)
+// The Orchestrator imports SecurityAgent/PerformanceAgent which pull in puppeteer
+// at the module level. On hosted platforms without Chromium (Render free tier),
+// this would crash the server at startup. We load them on-demand instead.
+// ---------------------------------------------------------------------------
+function lazyOrchestrator() {
+  const { Orchestrator } = require('../orchestrator');
+  return Orchestrator;
+}
 
 const logger = new Logger('dashboard');
-const store = new ResultStore();
 
 // Track running scans so we can abort them
-const runningScans = new Map<string, { orchestrator: Orchestrator; abortController: AbortController }>();
+const runningScans = new Map<string, { orchestrator: any; abortController: AbortController }>();
 
 const JWT_SECRET = process.env.JWT_SECRET || 'vzy-dashboard-secret-key-2026';
 const JWT_EXPIRES_IN = '24h';
@@ -366,25 +374,46 @@ app.delete('/api/auth/users/:id', authMiddleware, requireRole('admin'), async (r
 
 // ============================= EXISTING API ENDPOINTS =======================
 
-// Get latest scan report
+// Get latest scan report (direct PostgreSQL — no ResultStore/Redis dependency)
 app.get('/api/reports/latest', async (req, res) => {
   const target = req.query.target as string;
   if (!target) return res.status(400).json({ error: 'target query param required' });
 
-  const report = await store.getLatestReport(target);
-  if (!report) return res.status(404).json({ error: 'No reports found' });
-  res.json(report);
+  try {
+    const result = await pg.query(
+      `SELECT report_json FROM scan_reports WHERE target_url = $1 ORDER BY created_at DESC LIMIT 1`,
+      [target],
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'No reports found' });
+    res.json(result.rows[0].report_json);
+  } catch (error) {
+    logger.error('Failed to get latest report', { error: String(error) });
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
-// Get trend data
+// Get trend data (direct PostgreSQL)
 app.get('/api/trends', async (req, res) => {
   const target = req.query.target as string;
   const days = parseInt(req.query.days as string) || 30;
 
   if (!target) return res.status(400).json({ error: 'target query param required' });
 
-  const trend = await store.getTrend(target, days);
-  res.json(trend);
+  try {
+    const result = await pg.query(
+      `SELECT created_at as date, overall_score as score,
+              security_score as security, performance_score as performance,
+              code_quality_score as "codeQuality"
+       FROM scan_reports
+       WHERE target_url = $1 AND created_at > NOW() - make_interval(days => $2)
+       ORDER BY created_at`,
+      [target, days],
+    );
+    res.json(result.rows);
+  } catch (error) {
+    logger.error('Failed to get trends', { error: String(error) });
+    res.json([]);
+  }
 });
 
 // Trigger manual scan
@@ -395,11 +424,12 @@ app.post('/api/scans', authMiddleware, requireRole('admin', 'devops') as any, as
     return res.status(400).json({ error: 'url or repoPath required' });
   }
 
-  const config = Orchestrator.createConfig({ url, repoPath, agents, platform });
+  const OrchestratorClass = lazyOrchestrator();
+  const config = OrchestratorClass.createConfig({ url, repoPath, agents, platform });
   res.json({ status: 'queued', scanId: config.id });
 
   // Run scan in background with abort support
-  const orchestrator = new Orchestrator();
+  const orchestrator = new OrchestratorClass();
   const abortController = new AbortController();
   runningScans.set(config.id, { orchestrator, abortController });
 
@@ -442,9 +472,11 @@ app.post('/api/scans/batch', authMiddleware, requireRole('admin', 'devops') as a
   // De-duplicate and trim URLs
   const uniqueUrls = [...new Set(urls.map((u: string) => u.trim()).filter(Boolean))];
 
+  const OrchestratorClass = lazyOrchestrator();
+
   // Create configs lazily per URL (avoid sharing state between configs)
   const scanEntries = uniqueUrls.map((url: string) => {
-    const config = Orchestrator.createConfig({ url, agents, platform });
+    const config = OrchestratorClass.createConfig({ url, agents, platform });
     return { url, scanId: config.id, config, status: 'queued' as string };
   });
 
@@ -472,7 +504,7 @@ app.post('/api/scans/batch', authMiddleware, requireRole('admin', 'devops') as a
 
     logger.info(`[Batch ${batchId}] Starting scan ${i + 1}/${scanEntries.length}: ${entry.url}`);
 
-    const orchestrator = new Orchestrator();
+    const orchestrator = new OrchestratorClass();
     const abortController = new AbortController();
     runningScans.set(entry.scanId, { orchestrator, abortController });
 
@@ -712,12 +744,32 @@ io.on('connection', (socket) => {
 
 // ============================= START SERVER =================================
 const PORT = parseInt(process.env.PORT || process.env.DASHBOARD_PORT || '3001');
+const HOST = process.env.HOST || '0.0.0.0';  // Bind to all interfaces (required for Render/Docker)
+
+// Catch unhandled errors so the server doesn't crash silently
+process.on('unhandledRejection', (reason) => {
+  logger.error('Unhandled rejection', { error: String(reason) });
+});
+process.on('uncaughtException', (err) => {
+  logger.error('Uncaught exception', { error: String(err), stack: err.stack });
+  // Don't exit — let health check keep responding
+});
 
 async function start() {
-  await initializeAuthDB();
-  await loadSystemConfig();
-  server.listen(PORT, () => {
-    logger.info(`Dashboard API running on http://localhost:${PORT}`);
+  try {
+    await initializeAuthDB();
+  } catch (err) {
+    logger.error('DB init failed (will retry on first request)', { error: String(err) });
+  }
+
+  try {
+    await loadSystemConfig();
+  } catch (err) {
+    logger.error('Config load failed (using defaults)', { error: String(err) });
+  }
+
+  server.listen(PORT, HOST, () => {
+    logger.info(`Dashboard API running on http://${HOST}:${PORT}`);
     logger.info(`Default admin credentials: admin@dishtv.in / admin123`);
   });
 }

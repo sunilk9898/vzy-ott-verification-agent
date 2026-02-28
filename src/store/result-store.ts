@@ -3,14 +3,26 @@
 // ============================================================================
 
 import { Pool } from 'pg';
-import Redis from 'ioredis';
 import { Logger } from '../utils/logger';
 import { ScanReport } from '../types';
+
+// Lazy-load ioredis to avoid startup crash when Redis is not configured
+let Redis: any;
+function getRedisClass() {
+  if (!Redis) {
+    try {
+      Redis = require('ioredis').default || require('ioredis');
+    } catch {
+      Redis = null;
+    }
+  }
+  return Redis;
+}
 
 export class ResultStore {
   private logger = new Logger('result-store');
   private pg?: Pool;
-  private redis?: Redis;
+  private redis?: any;
 
   constructor() {
     // Initialize PostgreSQL if configured
@@ -18,9 +30,12 @@ export class ResultStore {
       this.pg = new Pool({ connectionString: process.env.DATABASE_URL });
     }
 
-    // Initialize Redis if configured
+    // Initialize Redis if configured (lazy-loaded to avoid import crash)
     if (process.env.REDIS_URL) {
-      this.redis = new Redis(process.env.REDIS_URL);
+      const RedisClass = getRedisClass();
+      if (RedisClass) {
+        this.redis = new RedisClass(process.env.REDIS_URL);
+      }
     }
   }
 
@@ -153,7 +168,7 @@ export class ResultStore {
         const since = Date.now() - days * 86400 * 1000;
         const results = await this.redis.zrangebyscore(`trend:${target}`, since, '+inf');
         if (results.length > 0) {
-          return results.map((r) => JSON.parse(r));
+          return results.map((r: string) => JSON.parse(r));
         }
         // Redis returned empty — fall through to PostgreSQL
       } catch {
