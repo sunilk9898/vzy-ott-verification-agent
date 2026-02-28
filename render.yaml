@@ -1,0 +1,30 @@
+# Render.com Blueprint — auto-provisions backend API + PostgreSQL
+# Deploy: https://render.com/deploy?repo=https://github.com/sunilk9898/vzy-ott-verification-agent
+
+databases:
+  - name: vzy-postgres
+    plan: free
+    databaseName: vzy_agent
+    user: vzy
+
+services:
+  - type: web
+    name: vzy-api
+    plan: free
+    runtime: node
+    buildCommand: npm ci && npx tsc
+    startCommand: node dist/dashboard/server.js
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "3001"
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: vzy-postgres
+          property: connectionString
+      - key: CORS_ORIGIN
+        value: https://dashboard-topaz-omega-93.vercel.app
