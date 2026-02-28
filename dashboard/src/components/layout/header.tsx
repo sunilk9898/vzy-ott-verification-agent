@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useReportStore, useAuthStore, useScanStore } from "@/lib/store";
 import { getScoreStatus, timeAgo, cn } from "@/lib/utils";
 import { abortScan } from "@/lib/api";
@@ -8,11 +7,12 @@ import {
   Bell, User, LogOut, Loader2, Activity, StopCircle,
 } from "lucide-react";
 
+const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
+
 export function Header() {
   const { report } = useReportStore();
   const { user, logout } = useAuthStore();
   const { activeScan, setActiveScan } = useScanStore();
-  const router = useRouter();
 
   const status = report ? getScoreStatus(report.kpiScore.overallScore) : null;
 
@@ -91,7 +91,7 @@ export function Header() {
             <button
               onClick={() => {
                 logout();
-                router.push("/login");
+                window.location.href = basePath + "/login";
               }}
               className="btn-ghost p-1.5 ml-1"
               aria-label="Logout"

@@ -22,7 +22,7 @@ const nextConfig = {
 
   reactStrictMode: true,
 
-  // Make backend API URL available at build time
+  // Make backend API URL and basePath available at build time
   env: {
     NEXT_PUBLIC_API_URL:
       process.env.NEXT_PUBLIC_API_URL ||
@@ -35,6 +35,7 @@ const nextConfig = {
       (isGitHubPages
         ? "https://vzy-api-gro1.onrender.com"
         : "http://localhost:3001"),
+    NEXT_PUBLIC_BASE_PATH: isGitHubPages ? `/${repoName}` : "",
   },
 
   // Images: use unoptimized for static export (no server-side optimization)

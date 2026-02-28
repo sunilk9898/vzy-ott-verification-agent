@@ -5,8 +5,11 @@ import { useRouter } from "next/navigation";
 import { Zap, Loader2, AlertCircle, Eye } from "lucide-react";
 import { login } from "@/lib/api";
 import { useAuthStore, useReportStore } from "@/lib/store";
-import { DEMO_USER, DEMO_TOKEN, DEMO_REPORT } from "@/lib/demo-data";
+import { DEMO_USER, DEMO_TOKEN } from "@/lib/demo-data";
 import type { UserRole } from "@/types/api";
+
+// basePath for navigation — set at build time by next.config.js
+const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -14,7 +17,6 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const { setAuth } = useAuthStore();
-  const { setReport, setTarget } = useReportStore();
   const router = useRouter();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -28,7 +30,8 @@ export default function LoginPage() {
         { id: user.id, email: user.email, name: user.name, role: user.role as UserRole },
         token,
       );
-      router.push("/");
+      // Full page reload to ensure clean state — basePath is added automatically
+      window.location.href = (basePath || "") + "/";
       return;
     } catch (err: any) {
       setError(err.message || "Authentication failed. Try Demo mode below.");
@@ -37,13 +40,11 @@ export default function LoginPage() {
   };
 
   const handleDemoLogin = () => {
-    // Set demo auth (bypasses backend entirely)
+    // Set demo auth (bypasses backend entirely) — persisted to localStorage
     setAuth(DEMO_USER, DEMO_TOKEN);
-    // Pre-load sample scan report so dashboard shows data
-    setTarget(DEMO_REPORT.target.url || "https://www.watcho.com");
-    setReport(DEMO_REPORT as any);
-    // Navigate to dashboard
-    router.push("/");
+    // Shell will auto-detect demo mode and load DEMO_REPORT on the dashboard page
+    // Full page reload for reliable navigation with basePath
+    window.location.href = (basePath || "") + "/";
   };
 
   return (
