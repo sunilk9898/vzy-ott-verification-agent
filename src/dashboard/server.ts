@@ -5,6 +5,7 @@
 import 'dotenv/config';
 import express, { Request, Response, NextFunction } from 'express';
 import helmet from 'helmet';
+import cors from 'cors';
 import { Server } from 'socket.io';
 import http from 'http';
 import jwt from 'jsonwebtoken';
@@ -38,6 +39,12 @@ const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });
 
 app.use(helmet());
+app.use(cors({
+  origin: process.env.CORS_ORIGIN || '*',
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
 app.use(express.json());
 app.use(express.static('dashboard-ui'));
 
@@ -704,7 +711,7 @@ io.on('connection', (socket) => {
 });
 
 // ============================= START SERVER =================================
-const PORT = parseInt(process.env.DASHBOARD_PORT || '3000');
+const PORT = parseInt(process.env.PORT || process.env.DASHBOARD_PORT || '3001');
 
 async function start() {
   await initializeAuthDB();
