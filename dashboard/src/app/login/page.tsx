@@ -28,7 +28,7 @@ export default function LoginPage() {
         { id: user.id, email: user.email, name: user.name, role: user.role as UserRole },
         token,
       );
-      window.location.href = "/";
+      router.push("/");
       return;
     } catch (err: any) {
       setError(err.message || "Authentication failed. Try Demo mode below.");

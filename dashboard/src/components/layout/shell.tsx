@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { Sidebar } from "./sidebar";
 import { Header } from "./header";
@@ -18,14 +18,22 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
 
+  // Hydration guard: zustand persist loads from localStorage async,
+  // so token is null on the very first render. Wait one tick.
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => {
+    setHydrated(true);
+  }, []);
+
   const isLoginPage = pathname === "/login";
 
   // Client-side auth guard (middleware doesn't work in static export)
   useEffect(() => {
+    if (!hydrated) return; // wait for store hydration
     if (!token && !isLoginPage) {
       router.replace("/login");
     }
-  }, [token, isLoginPage, router]);
+  }, [hydrated, token, isLoginPage, router]);
 
   // Load latest report when target changes (only when authenticated)
   useEffect(() => {
@@ -73,8 +81,8 @@ export function Shell({ children }: { children: React.ReactNode }) {
     return <>{children}</>;
   }
 
-  // If no token and not on login page, show nothing while redirecting
-  if (!token) {
+  // Wait for hydration before deciding to show content or redirect
+  if (!hydrated || !token) {
     return null;
   }
 

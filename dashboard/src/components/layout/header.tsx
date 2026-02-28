@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useReportStore, useAuthStore, useScanStore } from "@/lib/store";
 import { getScoreStatus, timeAgo, cn } from "@/lib/utils";
 import { abortScan } from "@/lib/api";
@@ -11,6 +12,7 @@ export function Header() {
   const { report } = useReportStore();
   const { user, logout } = useAuthStore();
   const { activeScan, setActiveScan } = useScanStore();
+  const router = useRouter();
 
   const status = report ? getScoreStatus(report.kpiScore.overallScore) : null;
 
@@ -89,7 +91,7 @@ export function Header() {
             <button
               onClick={() => {
                 logout();
-                window.location.href = "/login";
+                router.push("/login");
               }}
               className="btn-ghost p-1.5 ml-1"
               aria-label="Logout"
