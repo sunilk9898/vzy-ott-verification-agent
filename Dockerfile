@@ -55,12 +55,12 @@ RUN groupadd -r agent && useradd -r -g agent -d /app agent
 RUN mkdir -p /app/logs /app/scan-results && chown -R agent:agent /app
 USER agent
 
-# Expose ports
-EXPOSE 3000 9090
+# Expose port (uses PORT env var, default 3001)
+EXPOSE 3001
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:3000/api/health', (r) => { process.exit(r.statusCode === 200 ? 0 : 1) })"
+  CMD node -e "const p=process.env.PORT||3001;require('http').get('http://localhost:'+p+'/api/health',(r)=>{process.exit(r.statusCode===200?0:1)})"
 
-# Default: run scheduler + dashboard
-CMD ["node", "dist/scheduler/cron.js"]
+# Default: run dashboard API server
+CMD ["node", "dist/dashboard/server.js"]
