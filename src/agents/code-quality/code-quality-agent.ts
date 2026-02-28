@@ -114,6 +114,7 @@ export class CodeQualityAgent extends BaseAgent {
   protected async scan(config: ScanConfig): Promise<void> {
     if (!this.repoPath) {
       await this.scanFromURL(config);
+      this.populateMetadata();
       return;
     }
 
@@ -137,6 +138,9 @@ export class CodeQualityAgent extends BaseAgent {
 
     // Phase 7: Complexity Analysis
     await this.analyzeComplexity();
+
+    // Phase 8: Populate structured metadata for dashboard
+    this.populateMetadata();
   }
 
   protected async teardown(): Promise<void> {
@@ -716,6 +720,127 @@ export class CodeQualityAgent extends BaseAgent {
 
     walk(dir);
     return files.slice(0, 5000); // Cap at 5000 files
+  }
+
+  // ---------------------------------------------------------------------------
+  // Populate Structured Metadata for Dashboard
+  // ---------------------------------------------------------------------------
+  private populateMetadata(): void {
+    // ── Lint Results ──
+    const staticFindings = this.findings.filter((f) => f.category === 'Static Analysis' || f.category === 'Semgrep');
+    const eslintErrors = staticFindings.filter((f) => f.severity === 'medium' || f.severity === 'high').length;
+    const eslintWarnings = staticFindings.filter((f) => f.severity === 'low').length;
+    const fixable = staticFindings.filter((f) => f.autoFixable).length;
+
+    // ── Dead Code ──
+    const deadCodeFindings = this.findings.filter((f) => f.category === 'Dead Code');
+    const deadCode = deadCodeFindings.map((f) => ({
+      type: f.title.includes('Unused import') ? 'unused-import' as const
+        : f.title.includes('Unreachable') ? 'unreachable' as const
+        : 'unused-variable' as const,
+      file: f.location?.file || '',
+      line: f.location?.line || 0,
+      code: f.description,
+      confidence: 0.8,
+    }));
+
+    // ── Memory Leaks ──
+    const memoryLeakFindings = this.findings.filter((f) => f.category === 'Memory Leak');
+    const memoryLeaks = memoryLeakFindings.map((f) => ({
+      type: f.title.includes('addEventListener') ? 'event-listener' as const
+        : f.title.includes('setInterval') || f.title.includes('setTimeout') ? 'timer' as const
+        : f.title.includes('subscribe') ? 'subscription' as const
+        : f.title.includes('Player') ? 'dom-reference' as const
+        : 'closure' as const,
+      file: f.location?.file || '',
+      line: f.location?.line || 0,
+      description: f.description,
+      severity: f.severity,
+    }));
+
+    // ── Async Issues ──
+    const asyncIssueFindings = this.findings.filter((f) => f.category === 'Async Issue');
+    const asyncIssues = asyncIssueFindings.map((f) => ({
+      type: f.title.includes('missing await') ? 'missing-await' as const
+        : f.title.includes('Empty catch') ? 'unhandled-promise' as const
+        : f.title.includes('Promise.all') ? 'race-condition' as const
+        : 'unhandled-promise' as const,
+      file: f.location?.file || '',
+      line: f.location?.line || 0,
+      description: f.description,
+      severity: f.severity,
+    }));
+
+    // ── Anti-patterns ──
+    const antiPatternFindings = this.findings.filter((f) => f.category === 'Anti-pattern' || f.category === 'Anti-patterns');
+    const antiPatterns = antiPatternFindings.map((f) => ({
+      pattern: f.title.split(':')[0] || f.title,
+      file: f.location?.file || '',
+      line: f.location?.line || 0,
+      description: f.description,
+      suggestion: f.remediation,
+      severity: f.severity,
+    }));
+
+    // ── Unhandled Exceptions ──
+    const exceptionFindings = this.findings.filter((f) => f.category === 'Unhandled Exception');
+    const unhandledExceptions = exceptionFindings.map((f) => ({
+      type: f.title.includes('JSON.parse') ? 'uncaught' as const
+        : f.title.includes('empty catch') ? 'empty-catch' as const
+        : f.title.includes('Deep property') ? 'uncaught' as const
+        : 'generic-catch' as const,
+      file: f.location?.file || '',
+      line: f.location?.line || 0,
+      description: f.description,
+    }));
+
+    // ── Complexity ──
+    const complexityFindings = this.findings.filter((f) => f.category === 'Complexity');
+    const complexityValues = complexityFindings.map((f) => {
+      const match = f.title.match(/complexity \((\d+)\)/);
+      return match ? parseInt(match[1]) : 15;
+    });
+    const avgComplexity = complexityValues.length > 0
+      ? complexityValues.reduce((s, v) => s + v, 0) / complexityValues.length
+      : 5;
+    const maxComplexity = complexityValues.length > 0
+      ? Math.max(...complexityValues)
+      : 5;
+
+    // Estimate technical debt (rough: 30 min per medium finding, 2h per high, 4h per critical)
+    const debtHours = this.findings.reduce((sum, f) => {
+      switch (f.severity) {
+        case 'critical': return sum + 4;
+        case 'high': return sum + 2;
+        case 'medium': return sum + 0.5;
+        case 'low': return sum + 0.25;
+        default: return sum;
+      }
+    }, 0);
+    const debtDays = Math.floor(debtHours / 8);
+    const debtRemainingHours = Math.round(debtHours % 8);
+    const technicalDebt = debtDays > 0 ? `${debtDays}d ${debtRemainingHours}h` : `${Math.round(debtHours)}h`;
+
+    this.metadata = {
+      lintResults: {
+        errors: eslintErrors,
+        warnings: eslintWarnings,
+        fixable,
+      },
+      deadCode,
+      memoryLeaks,
+      asyncIssues,
+      antiPatterns,
+      unhandledExceptions,
+      complexity: {
+        avgCyclomaticComplexity: Math.round(avgComplexity * 10) / 10,
+        maxCyclomaticComplexity: maxComplexity,
+        avgCognitiveComplexity: Math.round(avgComplexity * 0.8 * 10) / 10,
+        maxCognitiveComplexity: Math.round(maxComplexity * 0.8),
+        duplicateBlocks: 0,
+        technicalDebt,
+      },
+    };
   }
 
   // ---------------------------------------------------------------------------

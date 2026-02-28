@@ -30,6 +30,13 @@ export class PerformanceAgent extends BaseAgent {
   private browser?: Browser;
   private chrome?: chromeLauncher.LaunchedChrome;
 
+  // ── Metric collectors for metadata ──
+  private _lhScores: { performance: number; accessibility: number; bestPractices: number; seo: number } | null = null;
+  private _cwvValues: Record<string, { value: number; rating: 'good' | 'needs-improvement' | 'poor' }> = {};
+  private _playerMetrics: Record<string, number> = {};
+  private _resourceData: { totalSize: number; jsSize: number; cssSize: number; imageSize: number; fontSize: number; thirdPartySize: number; requestCount: number; renderBlocking: string[] } | null = null;
+  private _cdnStats: { hits: number; total: number; latencies: number[]; compressed: number; uncompressed: number } = { hits: 0, total: 0, latencies: [], compressed: 0, uncompressed: 0 };
+
   constructor() {
     super('performance');
   }
@@ -65,6 +72,9 @@ export class PerformanceAgent extends BaseAgent {
       await this.analyzeCDN(url);
       await this.analyzeResources(url);
     }
+
+    // Phase 5: Populate structured metadata for dashboard
+    this.populateMetadata();
   }
 
   protected async teardown(): Promise<void> {
@@ -106,6 +116,14 @@ export class PerformanceAgent extends BaseAgent {
 
       const lhr = result.lhr;
       const perfScore = (lhr.categories.performance?.score || 0) * 100;
+
+      // Store scores for metadata
+      this._lhScores = {
+        performance: perfScore,
+        accessibility: (lhr.categories.accessibility?.score || 0) * 100,
+        bestPractices: (lhr.categories['best-practices']?.score || 0) * 100,
+        seo: (lhr.categories.seo?.score || 0) * 100,
+      };
 
       // Check against target
       if (perfScore < THRESHOLDS.lighthouseScore) {
@@ -223,6 +241,19 @@ export class PerformanceAgent extends BaseAgent {
         { name: 'TTFB', value: ttfb, threshold: THRESHOLDS.ttfb, unit: 'ms' },
       ];
 
+      // Store CWV values for metadata
+      const rateMetric = (val: number, good: number, poor: number): 'good' | 'needs-improvement' | 'poor' =>
+        val <= good ? 'good' : val <= poor ? 'needs-improvement' : 'poor';
+
+      this._cwvValues = {
+        lcp: { value: webVitals.lcp || 0, rating: rateMetric(webVitals.lcp || 0, 2500, 4000) },
+        fcp: { value: paintTimings.fcp || 0, rating: rateMetric(paintTimings.fcp || 0, 1800, 3000) },
+        cls: { value: webVitals.cls || 0, rating: rateMetric(webVitals.cls || 0, 0.1, 0.25) },
+        fid: { value: webVitals.fid || 0, rating: rateMetric(webVitals.fid || 0, 100, 300) },
+        ttfb: { value: ttfb, rating: rateMetric(ttfb, 800, 1800) },
+        inp: { value: 0, rating: 'good' as const },
+      };
+
       for (const metric of metrics) {
         const isOverThreshold = metric.name === 'CLS'
           ? metric.value > metric.threshold
@@ -286,6 +317,7 @@ export class PerformanceAgent extends BaseAgent {
 
       if (!playerMetrics?.hasVideo) {
         this.logger.info('No video player found on landing page - skipping player metrics');
+        this._playerMetrics = {}; // Mark as "no player"
         return;
       }
 
@@ -354,6 +386,18 @@ export class PerformanceAgent extends BaseAgent {
           autoFixable: false,
         });
       }
+
+      // Store player metrics for metadata
+      this._playerMetrics = {
+        startupDelay: startupTime,
+        timeToFirstFrame: startupTime,
+        bufferRatio: 0,
+        rebufferEvents: 0,
+        abrSwitchCount: abrConfig ? 1 : 0,
+        abrSwitchLatency: 0,
+        drmLicenseTime: 0,
+        playbackFailures: 0,
+      };
     } finally {
       await browser.close();
     }
@@ -381,6 +425,10 @@ export class PerformanceAgent extends BaseAgent {
         const cdnHeaders = headers['x-cache'] || headers['x-cdn'] || headers['cf-cache-status'] || '';
 
         if (url.match(/\.(js|css|png|jpg|jpeg|gif|svg|woff2?|ttf|mp4|m3u8|ts)$/i)) {
+          // Track CDN stats for metadata
+          this._cdnStats.total++;
+          if (cdnHeaders.toLowerCase().includes('hit')) this._cdnStats.hits++;
+
           if (!cacheControl || cacheControl.includes('no-cache') || cacheControl.includes('no-store')) {
             this.addFinding({
               severity: 'medium',
@@ -397,6 +445,8 @@ export class PerformanceAgent extends BaseAgent {
 
           // Check compression
           const encoding = headers['content-encoding'];
+          if (encoding) this._cdnStats.compressed++;
+          else this._cdnStats.uncompressed++;
           const contentType = headers['content-type'] || '';
           if (!encoding && (contentType.includes('javascript') || contentType.includes('css') || contentType.includes('html'))) {
             this.addFinding({
@@ -452,6 +502,7 @@ export class PerformanceAgent extends BaseAgent {
       const jsSize = resources.filter((r) => r.type.includes('javascript')).reduce((sum, r) => sum + r.size, 0);
       const cssSize = resources.filter((r) => r.type.includes('css')).reduce((sum, r) => sum + r.size, 0);
       const imgSize = resources.filter((r) => r.type.includes('image')).reduce((sum, r) => sum + r.size, 0);
+      const fontSize = resources.filter((r) => r.type.includes('font') || r.url.match(/\.(woff2?|ttf|otf|eot)$/i)).reduce((sum, r) => sum + r.size, 0);
 
       // Total page weight check
       if (totalSize > 5_000_000) { // 5MB
@@ -484,6 +535,18 @@ export class PerformanceAgent extends BaseAgent {
         return blocking;
       });
 
+      // Store resource data for metadata
+      this._resourceData = {
+        totalSize,
+        jsSize,
+        cssSize,
+        imageSize: imgSize,
+        fontSize,
+        thirdPartySize: 0,
+        requestCount: resources.length,
+        renderBlocking,
+      };
+
       if (renderBlocking.length > 3) {
         this.addFinding({
           severity: 'high',
@@ -503,93 +566,158 @@ export class PerformanceAgent extends BaseAgent {
   }
 
   // ---------------------------------------------------------------------------
+  // Populate Structured Metadata for Dashboard
+  // ---------------------------------------------------------------------------
+  private populateMetadata(): void {
+    // ── Lighthouse Metrics ──
+    const lighthouse = this._lhScores
+      ? {
+          performanceScore: this._lhScores.performance,
+          accessibilityScore: this._lhScores.accessibility,
+          bestPracticesScore: this._lhScores.bestPractices,
+          seoScore: this._lhScores.seo,
+          pwaScore: 0,
+        }
+      : null;
+
+    // ── Core Web Vitals ──
+    const coreWebVitals = Object.keys(this._cwvValues).length > 0 ? this._cwvValues : null;
+
+    // ── Player Metrics ──
+    const hasPlayer = this._playerMetrics && Object.keys(this._playerMetrics).length > 0;
+    const playerMetrics = hasPlayer
+      ? {
+          startupDelay: this._playerMetrics.startupDelay || 0,
+          timeToFirstFrame: this._playerMetrics.timeToFirstFrame || 0,
+          bufferRatio: this._playerMetrics.bufferRatio || 0,
+          rebufferEvents: this._playerMetrics.rebufferEvents || 0,
+          abrSwitchCount: this._playerMetrics.abrSwitchCount || 0,
+          abrSwitchLatency: this._playerMetrics.abrSwitchLatency || 0,
+          drmLicenseTime: this._playerMetrics.drmLicenseTime || 0,
+          playbackFailures: this._playerMetrics.playbackFailures || 0,
+        }
+      : null;
+
+    // ── CDN Metrics ──
+    const cdnTotal = this._cdnStats.total || 1;
+    const cdnMetrics = {
+      hitRatio: this._cdnStats.total > 0 ? this._cdnStats.hits / cdnTotal : 0,
+      avgLatency: 0,
+      p95Latency: 0,
+      compressionEnabled: this._cdnStats.compressed > this._cdnStats.uncompressed,
+    };
+
+    // ── Resource Metrics ──
+    const resourceMetrics = this._resourceData
+      ? {
+          totalSize: this._resourceData.totalSize,
+          jsSize: this._resourceData.jsSize,
+          cssSize: this._resourceData.cssSize,
+          imageSize: this._resourceData.imageSize,
+          fontSize: this._resourceData.fontSize,
+          thirdPartySize: this._resourceData.thirdPartySize,
+          requestCount: this._resourceData.requestCount,
+          renderBlockingResources: this._resourceData.renderBlocking,
+        }
+      : null;
+
+    this.metadata = {
+      lighthouse,
+      coreWebVitals,
+      playerMetrics,
+      cdnMetrics,
+      resourceMetrics,
+    };
+  }
+
+  // ---------------------------------------------------------------------------
   // Scoring
   // ---------------------------------------------------------------------------
   protected calculateScore(): WeightedScore {
-    // ── Proportional scoring: maps real metrics to points, not double-counting ──
+    // ── Lighthouse-anchored scoring ──
+    //
+    // Chrome Lighthouse already includes CWV metrics (LCP, FCP, CLS, TTFB, TBT, SI)
+    // in its Performance score. If we also penalize CWV separately, we double-count.
+    //
+    // New model: Lighthouse is the PRIMARY driver (60 pts), with OTT-specific
+    // categories (Player, CDN, Resources) as additional checks (40 pts combined).
+    // CWV findings are kept for display but NOT scored separately.
 
-    // 1. LIGHTHOUSE (25 points) — directly proportional to actual Lighthouse score
-    //    Lighthouse 66 → 66% of 25 = 16.5 pts (NOT penalized again for audit failures)
+    // 1. LIGHTHOUSE SCORE (60 points) — directly proportional to actual Lighthouse score
+    //    Lighthouse 66 → 66% of 60 = 39.6 pts
+    //    This already accounts for LCP, FCP, CLS, TBT, Speed Index, TTFB
     const lighthouseFindings = this.findings.filter((f) => f.category === 'Lighthouse');
-    let lighthouseActual = 25; // full score if no Lighthouse data
+    let lighthouseActual = 60; // full score if no Lighthouse data
     if (lighthouseFindings.length > 0) {
-      // Extract real Lighthouse score from finding evidence: {"performance":66,...}
       const mainFinding = lighthouseFindings[0];
       try {
         const evidence = JSON.parse(mainFinding.evidence || '{}');
         const lhScore = evidence.performance || 0;
-        lighthouseActual = Math.round((lhScore / 100) * 25 * 100) / 100;
+        lighthouseActual = Math.round((lhScore / 100) * 60 * 100) / 100;
       } catch {
-        // Fallback: mild penalty for the finding
-        lighthouseActual = Math.max(0, 25 - 10);
+        lighthouseActual = Math.max(0, 60 - 20);
       }
     }
     const lighthouseAuditFindings = this.findings.filter((f) => f.category === 'Lighthouse Audit');
 
-    // 2. CORE WEB VITALS (25 points) — proportional to how close to thresholds
+    // 2. CWV — NOT scored (already in Lighthouse). Kept for dashboard display only.
     const cwvFindings = this.findings.filter((f) => f.category === 'Core Web Vitals');
-    const cwvPenalty = cwvFindings.reduce((sum, f) => {
-      // Use gentler weights: critical=-12, high=-8, medium=-4
-      const w = f.severity === 'critical' ? 12 : f.severity === 'high' ? 8 : 4;
-      return sum + w;
-    }, 0);
-    const cwvActual = Math.max(0, 25 - Math.min(cwvPenalty, 25));
 
-    // 3. PLAYER METRICS (20 points) — penalty-based with gentle weights
+    // 3. PLAYER METRICS (15 points) — OTT-specific, not part of Lighthouse
     const playerFindings = this.findings.filter((f) => f.category.includes('Player'));
     const playerPenalty = playerFindings.reduce((sum, f) => {
-      const w = f.severity === 'critical' ? 10 : f.severity === 'high' ? 6 : 3;
+      const w = f.severity === 'critical' ? 8 : f.severity === 'high' ? 4 : 2;
       return sum + w;
     }, 0);
-    const playerActual = Math.max(0, 20 - Math.min(playerPenalty, 20));
+    const playerActual = Math.max(0, 15 - Math.min(playerPenalty, 15));
 
-    // 4. CDN EFFICIENCY (15 points) — penalty-based with gentle weights
+    // 4. CDN EFFICIENCY (13 points) — OTT-specific (CDN config, cache headers, compression)
     const cdnFindings = this.findings.filter((f) => f.category.includes('CDN'));
     const cdnPenalty = cdnFindings.reduce((sum, f) => {
-      const w = f.severity === 'critical' ? 8 : f.severity === 'high' ? 5 : 2;
+      const w = f.severity === 'critical' ? 5 : f.severity === 'high' ? 3 : 1;
       return sum + w;
     }, 0);
-    const cdnActual = Math.max(0, 15 - Math.min(cdnPenalty, 15));
+    const cdnActual = Math.max(0, 13 - Math.min(cdnPenalty, 13));
 
-    // 5. RESOURCE OPTIMIZATION (15 points) — penalty-based with gentle weights
+    // 5. RESOURCE OPTIMIZATION (12 points) — page weight, render-blocking
     const resourceFindings = this.findings.filter((f) =>
       f.category.includes('Resource') || f.category.includes('Render'),
     );
     const resourcePenalty = resourceFindings.reduce((sum, f) => {
-      const w = f.severity === 'critical' ? 8 : f.severity === 'high' ? 5 : 2;
+      const w = f.severity === 'critical' ? 5 : f.severity === 'high' ? 3 : 1;
       return sum + w;
     }, 0);
-    const resourceActual = Math.max(0, 15 - Math.min(resourcePenalty, 15));
+    const resourceActual = Math.max(0, 12 - Math.min(resourcePenalty, 12));
 
     const breakdown = [
       {
-        metric: 'Lighthouse Score', value: 0, maxScore: 25,
+        metric: 'Lighthouse Score', value: 0, maxScore: 60,
         actualScore: lighthouseActual,
-        penalty: Math.round((25 - lighthouseActual) * 100) / 100,
+        penalty: Math.round((60 - lighthouseActual) * 100) / 100,
         details: `${lighthouseFindings.length} finding(s), ${lighthouseAuditFindings.length} audit(s)`,
       },
       {
-        metric: 'Core Web Vitals', value: 0, maxScore: 25,
-        actualScore: cwvActual,
-        penalty: Math.min(cwvPenalty, 25),
-        details: `${cwvFindings.length} finding(s)`,
+        metric: 'Core Web Vitals (info)', value: 0, maxScore: 0,
+        actualScore: 0,
+        penalty: 0,
+        details: `${cwvFindings.length} finding(s) — included in Lighthouse score`,
       },
       {
-        metric: 'Player Metrics', value: 0, maxScore: 20,
+        metric: 'Player Metrics', value: 0, maxScore: 15,
         actualScore: playerActual,
-        penalty: Math.min(playerPenalty, 20),
+        penalty: Math.min(playerPenalty, 15),
         details: `${playerFindings.length} finding(s)`,
       },
       {
-        metric: 'CDN Efficiency', value: 0, maxScore: 15,
+        metric: 'CDN Efficiency', value: 0, maxScore: 13,
         actualScore: cdnActual,
-        penalty: Math.min(cdnPenalty, 15),
+        penalty: Math.min(cdnPenalty, 13),
         details: `${cdnFindings.length} finding(s)`,
       },
       {
-        metric: 'Resource Optimization', value: 0, maxScore: 15,
+        metric: 'Resource Optimization', value: 0, maxScore: 12,
         actualScore: resourceActual,
-        penalty: Math.min(resourcePenalty, 15),
+        penalty: Math.min(resourcePenalty, 12),
         details: `${resourceFindings.length} finding(s)`,
       },
     ];

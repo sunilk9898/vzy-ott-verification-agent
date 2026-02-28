@@ -1,6 +1,7 @@
 "use client";
 
 import { cn } from "@/lib/utils";
+import { ChevronRight } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 interface MetricCardProps {
@@ -11,6 +12,7 @@ interface MetricCardProps {
   trend?: { delta: number; label: string };
   status?: "good" | "warn" | "bad" | "neutral";
   className?: string;
+  onClick?: () => void;
 }
 
 export function MetricCard({
@@ -21,9 +23,20 @@ export function MetricCard({
   trend,
   status = "neutral",
   className,
+  onClick,
 }: MetricCardProps) {
+  const isClickable = !!onClick;
+  const Wrapper = isClickable ? "button" : "div";
+
   return (
-    <div className={cn("card p-4 animate-fade-up", className)}>
+    <Wrapper
+      onClick={onClick}
+      className={cn(
+        "card p-4 animate-fade-up text-left w-full",
+        isClickable && "cursor-pointer hover:bg-white/[0.04] hover:border-brand-500/30 transition-all group",
+        className,
+      )}
+    >
       <div className="flex items-start justify-between">
         <div className="min-w-0">
           <div className="text-xs font-medium text-gray-500 uppercase tracking-wider">{label}</div>
@@ -40,19 +53,24 @@ export function MetricCard({
           </div>
           {subtitle && <div className="text-xs text-gray-500 mt-0.5">{subtitle}</div>}
         </div>
-        {Icon && (
-          <div
-            className={cn(
-              "p-2 rounded-lg",
-              status === "good" && "bg-green-500/10 text-green-400",
-              status === "warn" && "bg-amber-500/10 text-amber-400",
-              status === "bad" && "bg-red-500/10 text-red-400",
-              status === "neutral" && "bg-white/[0.04] text-gray-400",
-            )}
-          >
-            <Icon className="w-4 h-4" />
-          </div>
-        )}
+        <div className="flex items-center gap-1">
+          {Icon && (
+            <div
+              className={cn(
+                "p-2 rounded-lg",
+                status === "good" && "bg-green-500/10 text-green-400",
+                status === "warn" && "bg-amber-500/10 text-amber-400",
+                status === "bad" && "bg-red-500/10 text-red-400",
+                status === "neutral" && "bg-white/[0.04] text-gray-400",
+              )}
+            >
+              <Icon className="w-4 h-4" />
+            </div>
+          )}
+          {isClickable && (
+            <ChevronRight className="w-3.5 h-3.5 text-gray-600 group-hover:text-brand-400 transition-colors" />
+          )}
+        </div>
       </div>
 
       {trend && (
@@ -68,6 +86,12 @@ export function MetricCard({
           <span className="text-xs text-gray-500">{trend.label}</span>
         </div>
       )}
-    </div>
+
+      {isClickable && (
+        <div className="mt-2 text-[10px] text-gray-600 group-hover:text-gray-400 transition-colors">
+          Click for details
+        </div>
+      )}
+    </Wrapper>
   );
 }

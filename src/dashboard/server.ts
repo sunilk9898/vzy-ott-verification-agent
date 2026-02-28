@@ -431,9 +431,14 @@ app.post('/api/scans/batch', authMiddleware, requireRole('admin', 'devops') as a
   }
 
   const batchId = `batch_${Date.now()}`;
-  const scanEntries = urls.map((url: string) => {
-    const config = Orchestrator.createConfig({ url: url.trim(), agents, platform });
-    return { url: url.trim(), scanId: config.id, config, status: 'queued' as string };
+
+  // De-duplicate and trim URLs
+  const uniqueUrls = [...new Set(urls.map((u: string) => u.trim()).filter(Boolean))];
+
+  // Create configs lazily per URL (avoid sharing state between configs)
+  const scanEntries = uniqueUrls.map((url: string) => {
+    const config = Orchestrator.createConfig({ url, agents, platform });
+    return { url, scanId: config.id, config, status: 'queued' as string };
   });
 
   // Return immediately with batch info
@@ -446,9 +451,20 @@ app.post('/api/scans/batch', authMiddleware, requireRole('admin', 'devops') as a
   // Emit batch start
   io.emit('batch:start', { batchId, total: scanEntries.length });
 
-  // Process sequentially
+  const BATCH_SCAN_TIMEOUT = 360_000; // 6 minutes per URL (slightly more than agent timeout)
+  const INTER_SCAN_DELAY = 3_000;     // 3 seconds between scans for cleanup
+
+  // Process sequentially with robust error isolation
   for (let i = 0; i < scanEntries.length; i++) {
     const entry = scanEntries[i];
+
+    // Inter-scan delay to allow previous browser/resource cleanup
+    if (i > 0) {
+      await new Promise((resolve) => setTimeout(resolve, INTER_SCAN_DELAY));
+    }
+
+    logger.info(`[Batch ${batchId}] Starting scan ${i + 1}/${scanEntries.length}: ${entry.url}`);
+
     const orchestrator = new Orchestrator();
     const abortController = new AbortController();
     runningScans.set(entry.scanId, { orchestrator, abortController });
@@ -463,7 +479,13 @@ app.post('/api/scans/batch', authMiddleware, requireRole('admin', 'devops') as a
     });
 
     try {
-      const report = await orchestrator.runScan(entry.config);
+      // Wrap each scan in its own timeout to prevent one hanging URL from stalling the batch
+      const report = await Promise.race([
+        orchestrator.runScan(entry.config),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error(`Batch scan timeout after ${BATCH_SCAN_TIMEOUT / 1000}s for ${entry.url}`)), BATCH_SCAN_TIMEOUT),
+        ),
+      ]);
 
       if (!abortController.signal.aborted) {
         io.emit('scan:complete', {
@@ -482,9 +504,13 @@ app.post('/api/scans/batch', authMiddleware, requireRole('admin', 'devops') as a
           status: 'completed',
           score: report.kpiScore.overallScore,
         });
+        logger.info(`[Batch ${batchId}] Scan ${i + 1} completed: ${entry.url} → ${report.kpiScore.overallScore}`);
       }
     } catch (error) {
-      io.emit('scan:error', { scanId: entry.scanId, url: entry.url, error: String(error), batchId });
+      const errMsg = error instanceof Error ? error.message : String(error);
+      logger.error(`[Batch ${batchId}] Scan ${i + 1} failed: ${entry.url}`, { error: errMsg });
+
+      io.emit('scan:error', { scanId: entry.scanId, url: entry.url, error: errMsg, batchId });
       io.emit('batch:progress', {
         batchId,
         current: i + 1,
@@ -492,7 +518,7 @@ app.post('/api/scans/batch', authMiddleware, requireRole('admin', 'devops') as a
         scanId: entry.scanId,
         url: entry.url,
         status: 'error',
-        error: String(error),
+        error: errMsg,
       });
     } finally {
       runningScans.delete(entry.scanId);

@@ -20,6 +20,7 @@ export abstract class BaseAgent {
   protected readonly logger: Logger;
   protected findings: Finding[] = [];
   protected errors: AgentError[] = [];
+  protected metadata: Record<string, unknown> = {};
   protected status: ScanStatus = 'queued';
   protected startedAt?: Date;
   protected completedAt?: Date;
@@ -36,6 +37,7 @@ export abstract class BaseAgent {
     this.startedAt = new Date();
     this.findings = [];
     this.errors = [];
+    this.metadata = {};
 
     this.logger.info(`Starting ${this.agentType} scan for ${config.target.url || config.target.repoPath}`);
 
@@ -110,7 +112,7 @@ export abstract class BaseAgent {
       durationMs: this.completedAt!.getTime() - this.startedAt!.getTime(),
       findings: this.findings,
       score: this.calculateScore(),
-      metadata: {},
+      metadata: this.metadata,
       errors: this.errors,
     };
   }

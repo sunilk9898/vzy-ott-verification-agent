@@ -48,6 +48,7 @@ const config: Config = {
         "score-in": "scoreIn 1s ease-out forwards",
         "fade-up": "fadeUp 0.5s ease-out forwards",
         "slide-in": "slideIn 0.3s ease-out forwards",
+        "slide-in-right": "slideInRight 0.25s ease-out forwards",
       },
       keyframes: {
         scoreIn: {
@@ -60,6 +61,10 @@ const config: Config = {
         },
         slideIn: {
           "0%": { opacity: "0", transform: "translateX(-12px)" },
+          "100%": { opacity: "1", transform: "translateX(0)" },
+        },
+        slideInRight: {
+          "0%": { opacity: "0", transform: "translateX(100%)" },
           "100%": { opacity: "1", transform: "translateX(0)" },
         },
       },
