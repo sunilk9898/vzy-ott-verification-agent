@@ -1,0 +1,150 @@
+# ============================================================================
+# Kubernetes Deployment - VZY OTT Verification Agent
+# ============================================================================
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vzy-agent
+  namespace: ott-monitoring
+  labels:
+    app: vzy-agent
+    component: scanner
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate   # Single instance to avoid scan conflicts
+  selector:
+    matchLabels:
+      app: vzy-agent
+  template:
+    metadata:
+      labels:
+        app: vzy-agent
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: agent
+          image: registry.dishtv.in/vzy-agent:latest
+          ports:
+            - containerPort: 3000
+              name: dashboard
+            - containerPort: 9090
+              name: webhook
+          envFrom:
+            - secretRef:
+                name: vzy-agent-secrets
+            - configMapRef:
+                name: vzy-agent-config
+          resources:
+            requests:
+              memory: "2Gi"
+              cpu: "1000m"
+            limits:
+              memory: "4Gi"
+              cpu: "2000m"
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 60
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          volumeMounts:
+            - name: scan-results
+              mountPath: /app/scan-results
+            - name: logs
+              mountPath: /app/logs
+      volumes:
+        - name: scan-results
+          persistentVolumeClaim:
+            claimName: vzy-scan-results-pvc
+        - name: logs
+          emptyDir: {}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vzy-agent-service
+  namespace: ott-monitoring
+spec:
+  selector:
+    app: vzy-agent
+  ports:
+    - name: dashboard
+      port: 3000
+      targetPort: 3000
+    - name: webhook
+      port: 9090
+      targetPort: 9090
+  type: ClusterIP
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vzy-agent-config
+  namespace: ott-monitoring
+data:
+  SCAN_TARGET_URL: "https://www.watcho.com"
+  SCAN_PLATFORM: "both"
+  SCAN_CRON: "0 2 * * *"
+  SCAN_TIMEZONE: "Asia/Kolkata"
+  DASHBOARD_PORT: "3000"
+  WEBHOOK_PORT: "9090"
+  LOG_LEVEL: "info"
+  NODE_ENV: "production"
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: vzy-scan-results-pvc
+  namespace: ott-monitoring
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+
+---
+# CronJob for scheduled scans (alternative to in-app cron)
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: vzy-scheduled-scan
+  namespace: ott-monitoring
+spec:
+  schedule: "0 2 * * *"
+  timeZone: "Asia/Kolkata"
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: scanner
+              image: registry.dishtv.in/vzy-agent:latest
+              command: ["node", "dist/cli.js", "scan", "--url", "$(SCAN_TARGET_URL)", "--platform", "both"]
+              envFrom:
+                - secretRef:
+                    name: vzy-agent-secrets
+                - configMapRef:
+                    name: vzy-agent-config
+              resources:
+                requests:
+                  memory: "2Gi"
+                  cpu: "1000m"
+                limits:
+                  memory: "4Gi"
+                  cpu: "2000m"
+          restartPolicy: OnFailure

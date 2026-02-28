@@ -1,0 +1,122 @@
+# ============================================================================
+# VZY OTT Verification Agent - Docker Compose Stack
+# ============================================================================
+
+version: '3.9'
+
+services:
+  # ---------- Core Agent Service ----------
+  agent:
+    build: .
+    container_name: vzy-agent
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "3000:3000"    # Dashboard API
+      - "9090:9090"    # Webhook server
+    volumes:
+      - ./scan-results:/app/scan-results
+      - ./logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2.0'
+        reservations:
+          memory: 2G
+          cpus: '1.0'
+    networks:
+      - agent-network
+
+  # ---------- PostgreSQL (Scan History) ----------
+  postgres:
+    image: postgres:16-alpine
+    container_name: vzy-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: vzy_agent
+      POSTGRES_USER: vzy
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vzy -d vzy_agent"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - agent-network
+
+  # ---------- Redis (Cache + Trend Data) ----------
+  redis:
+    image: redis:7-alpine
+    container_name: vzy-redis
+    restart: unless-stopped
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - agent-network
+
+  # ---------- Dashboard (Next.js Frontend) ----------
+  dashboard:
+    build: ./dashboard
+    container_name: vzy-dashboard
+    restart: unless-stopped
+    environment:
+      API_BASE_URL: http://agent:3000
+      NEXT_PUBLIC_API_URL: /api
+      NEXT_PUBLIC_WS_URL: http://localhost:3000
+    ports:
+      - "4000:4000"
+    depends_on:
+      - agent
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+    networks:
+      - agent-network
+
+  # ---------- Grafana (Optional: Trend Dashboard) ----------
+  grafana:
+    image: grafana/grafana:latest
+    container_name: vzy-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_INSTALL_PLUGINS: grafana-clock-panel,grafana-piechart-panel
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./infra/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./infra/grafana/datasources:/etc/grafana/provisioning/datasources
+    ports:
+      - "3001:3000"
+    depends_on:
+      - postgres
+    networks:
+      - agent-network
+
+volumes:
+  postgres-data:
+  redis-data:
+  grafana-data:
+
+networks:
+  agent-network:
+    driver: bridge

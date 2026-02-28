@@ -1,0 +1,124 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Base Dark Theme ────────────────────────────────────────────────── */
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+  html {
+    @apply antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+  body {
+    @apply bg-surface-0 text-gray-100 font-sans;
+  }
+
+  /* Scrollbar styling */
+  ::-webkit-scrollbar {
+    @apply w-1.5 h-1.5;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-white/10 rounded-full;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-white/20;
+  }
+}
+
+/* ── Component Layer ────────────────────────────────────────────────── */
+@layer components {
+  /* Cards */
+  .card {
+    @apply bg-surface-2 border border-white/[0.06] rounded-xl;
+  }
+  .card-hover {
+    @apply card transition-all duration-200 hover:border-white/[0.12] hover:bg-surface-3;
+  }
+
+  /* Glass effect */
+  .glass {
+    @apply bg-white/[0.04] backdrop-blur-xl border border-white/[0.08] rounded-xl;
+  }
+
+  /* Score gauge animations */
+  .gauge-ring {
+    transition: stroke-dashoffset 1.2s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  /* Severity badge */
+  .badge {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 text-xs font-semibold rounded-md border;
+  }
+
+  /* Status dot */
+  .status-dot {
+    @apply w-2 h-2 rounded-full;
+  }
+  .status-dot-healthy {
+    @apply status-dot bg-kpi-pass shadow-[0_0_8px_theme(colors.kpi.pass/0.5)];
+  }
+  .status-dot-warning {
+    @apply status-dot bg-kpi-warn shadow-[0_0_8px_theme(colors.kpi.warn/0.5)];
+  }
+  .status-dot-critical {
+    @apply status-dot bg-kpi-fail shadow-[0_0_8px_theme(colors.kpi.fail/0.5)] animate-pulse;
+  }
+
+  /* Data table */
+  .data-table {
+    @apply w-full text-sm;
+  }
+  .data-table thead th {
+    @apply px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider border-b border-white/[0.06];
+  }
+  .data-table tbody td {
+    @apply px-4 py-3 border-b border-white/[0.04];
+  }
+  .data-table tbody tr {
+    @apply transition-colors hover:bg-white/[0.02];
+  }
+
+  /* Input */
+  .input {
+    @apply w-full px-3 py-2 bg-surface-1 border border-white/[0.08] rounded-lg
+           text-gray-100 placeholder:text-gray-500
+           focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500/50
+           transition-all;
+  }
+
+  /* Button */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium
+           rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2
+           focus:ring-offset-surface-0 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-primary {
+    @apply btn bg-brand-600 text-white hover:bg-brand-500 focus:ring-brand-500;
+  }
+  .btn-secondary {
+    @apply btn bg-surface-3 text-gray-200 border border-white/[0.08]
+           hover:bg-surface-4 hover:border-white/[0.12] focus:ring-white/20;
+  }
+  .btn-danger {
+    @apply btn bg-red-600/20 text-red-400 border border-red-500/30
+           hover:bg-red-600/30 focus:ring-red-500/40;
+  }
+  .btn-ghost {
+    @apply btn text-gray-400 hover:text-gray-200 hover:bg-white/[0.06];
+  }
+}
+
+/* ── Utility Layer ──────────────────────────────────────────────────── */
+@layer utilities {
+  .text-gradient {
+    @apply bg-gradient-to-r from-brand-400 to-cyan-400 bg-clip-text text-transparent;
+  }
+  .border-glow {
+    box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.3), 0 0 20px -5px rgba(59, 130, 246, 0.2);
+  }
+}

@@ -1,0 +1,113 @@
+# ============================================================================
+# Kubernetes Deployment - VZY Dashboard (Next.js Frontend)
+# ============================================================================
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vzy-dashboard
+  namespace: ott-monitoring
+  labels:
+    app: vzy-dashboard
+    component: frontend
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: vzy-dashboard
+  template:
+    metadata:
+      labels:
+        app: vzy-dashboard
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+      containers:
+        - name: dashboard
+          image: registry.dishtv.in/vzy-dashboard:latest
+          ports:
+            - containerPort: 4000
+              name: http
+          env:
+            - name: API_BASE_URL
+              value: "http://vzy-agent-service:3000"
+            - name: NEXT_PUBLIC_API_URL
+              value: "/api"
+            - name: NEXT_PUBLIC_WS_URL
+              value: "ws://vzy-agent-service:3000"
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "200m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 4000
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 4000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vzy-dashboard-service
+  namespace: ott-monitoring
+spec:
+  selector:
+    app: vzy-dashboard
+  ports:
+    - name: http
+      port: 80
+      targetPort: 4000
+  type: ClusterIP
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vzy-dashboard-ingress
+  namespace: ott-monitoring
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - ott-monitor.dishtv.in
+      secretName: vzy-dashboard-tls
+  rules:
+    - host: ott-monitor.dishtv.in
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: vzy-dashboard-service
+                port:
+                  number: 80
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: vzy-agent-service
+                port:
+                  number: 3000
