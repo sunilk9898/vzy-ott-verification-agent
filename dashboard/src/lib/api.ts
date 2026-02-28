@@ -43,7 +43,7 @@ async function request<T>(
 // ---------------------------------------------------------------------------
 // Demo Mode Router — returns sample data for all API paths
 // ---------------------------------------------------------------------------
-function demoRequest<T>(path: string, _options: RequestInit = {}): T {
+function demoRequest<T>(path: string, options: RequestInit = {}): T {
   // Reports
   if (path.startsWith("/reports/latest")) return DEMO_REPORT as T;
   if (path.startsWith("/reports/")) return DEMO_REPORT as T;
@@ -53,8 +53,20 @@ function demoRequest<T>(path: string, _options: RequestInit = {}): T {
   if (path.startsWith("/trends")) return DEMO_TRENDS as T;
 
   // Scans
-  if (path.startsWith("/scans/batch"))
-    return { batchId: "demo_batch", total: 1, scans: [{ url: "https://www.watcho.com", scanId: "demo_scan_001", status: "queued" }] } as T;
+  if (path.startsWith("/scans/batch")) {
+    // Parse the submitted URLs from the request body
+    let urls: string[] = ["https://www.watcho.com"];
+    try {
+      const body = JSON.parse(options.body as string || "{}");
+      if (body.urls && Array.isArray(body.urls)) urls = body.urls;
+    } catch {}
+    const scans = urls.map((url: string, i: number) => ({
+      url,
+      scanId: `demo_scan_${String(i + 1).padStart(3, "0")}`,
+      status: "queued",
+    }));
+    return { batchId: "demo_batch", total: urls.length, scans } as T;
+  }
   if (path.startsWith("/scans"))
     return { status: "queued", scanId: "demo_scan_001" } as T;
 
