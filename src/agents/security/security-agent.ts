@@ -733,8 +733,21 @@ export class SecurityAgent extends BaseAgent {
   }
 
   private penaltyForCategory(prefix: string): number {
+    // Use gentler category-specific weights so a single HIGH finding
+    // doesn't wipe out an entire 10-15 point category.
+    // The base getSeverityWeight (critical=25, high=15) was designed for 100-point
+    // total, but categories are only 10-20 points each.
+    const gentleWeight = (severity: string): number => {
+      switch (severity) {
+        case 'critical': return 10;
+        case 'high': return 5;
+        case 'medium': return 2;
+        case 'low': return 1;
+        default: return 0;
+      }
+    };
     return this.findings
       .filter((f) => f.category.startsWith(prefix))
-      .reduce((sum, f) => sum + this.getSeverityWeight(f.severity), 0);
+      .reduce((sum, f) => sum + gentleWeight(f.severity), 0);
   }
 }

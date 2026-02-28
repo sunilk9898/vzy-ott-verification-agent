@@ -506,25 +506,94 @@ export class PerformanceAgent extends BaseAgent {
   // Scoring
   // ---------------------------------------------------------------------------
   protected calculateScore(): WeightedScore {
-    // Category-based scoring with capped penalties per category
-    const breakdown = [
-      { metric: 'Lighthouse Score', value: 0, maxScore: 25, actualScore: 0, penalty: 0, details: '' },
-      { metric: 'Core Web Vitals', value: 0, maxScore: 25, actualScore: 0, penalty: 0, details: '' },
-      { metric: 'Player Metrics', value: 0, maxScore: 20, actualScore: 0, penalty: 0, details: '' },
-      { metric: 'CDN Efficiency', value: 0, maxScore: 15, actualScore: 0, penalty: 0, details: '' },
-      { metric: 'Resource Optimization', value: 0, maxScore: 15, actualScore: 0, penalty: 0, details: '' },
-    ].map((b) => {
-      const matchingFindings = this.findings.filter((f) => f.category.includes(b.metric.split(' ')[0]));
-      const catPenalty = matchingFindings.reduce((sum, f) => sum + this.getSeverityWeight(f.severity), 0);
-      return {
-        ...b,
-        penalty: Math.min(catPenalty, b.maxScore), // cap penalty at category max
-        actualScore: Math.max(0, b.maxScore - catPenalty),
-        details: `${matchingFindings.length} finding(s)`,
-      };
-    });
+    // ── Proportional scoring: maps real metrics to points, not double-counting ──
 
-    // Sum remaining category scores (each individually capped)
+    // 1. LIGHTHOUSE (25 points) — directly proportional to actual Lighthouse score
+    //    Lighthouse 66 → 66% of 25 = 16.5 pts (NOT penalized again for audit failures)
+    const lighthouseFindings = this.findings.filter((f) => f.category === 'Lighthouse');
+    let lighthouseActual = 25; // full score if no Lighthouse data
+    if (lighthouseFindings.length > 0) {
+      // Extract real Lighthouse score from finding evidence: {"performance":66,...}
+      const mainFinding = lighthouseFindings[0];
+      try {
+        const evidence = JSON.parse(mainFinding.evidence || '{}');
+        const lhScore = evidence.performance || 0;
+        lighthouseActual = Math.round((lhScore / 100) * 25 * 100) / 100;
+      } catch {
+        // Fallback: mild penalty for the finding
+        lighthouseActual = Math.max(0, 25 - 10);
+      }
+    }
+    const lighthouseAuditFindings = this.findings.filter((f) => f.category === 'Lighthouse Audit');
+
+    // 2. CORE WEB VITALS (25 points) — proportional to how close to thresholds
+    const cwvFindings = this.findings.filter((f) => f.category === 'Core Web Vitals');
+    const cwvPenalty = cwvFindings.reduce((sum, f) => {
+      // Use gentler weights: critical=-12, high=-8, medium=-4
+      const w = f.severity === 'critical' ? 12 : f.severity === 'high' ? 8 : 4;
+      return sum + w;
+    }, 0);
+    const cwvActual = Math.max(0, 25 - Math.min(cwvPenalty, 25));
+
+    // 3. PLAYER METRICS (20 points) — penalty-based with gentle weights
+    const playerFindings = this.findings.filter((f) => f.category.includes('Player'));
+    const playerPenalty = playerFindings.reduce((sum, f) => {
+      const w = f.severity === 'critical' ? 10 : f.severity === 'high' ? 6 : 3;
+      return sum + w;
+    }, 0);
+    const playerActual = Math.max(0, 20 - Math.min(playerPenalty, 20));
+
+    // 4. CDN EFFICIENCY (15 points) — penalty-based with gentle weights
+    const cdnFindings = this.findings.filter((f) => f.category.includes('CDN'));
+    const cdnPenalty = cdnFindings.reduce((sum, f) => {
+      const w = f.severity === 'critical' ? 8 : f.severity === 'high' ? 5 : 2;
+      return sum + w;
+    }, 0);
+    const cdnActual = Math.max(0, 15 - Math.min(cdnPenalty, 15));
+
+    // 5. RESOURCE OPTIMIZATION (15 points) — penalty-based with gentle weights
+    const resourceFindings = this.findings.filter((f) =>
+      f.category.includes('Resource') || f.category.includes('Render'),
+    );
+    const resourcePenalty = resourceFindings.reduce((sum, f) => {
+      const w = f.severity === 'critical' ? 8 : f.severity === 'high' ? 5 : 2;
+      return sum + w;
+    }, 0);
+    const resourceActual = Math.max(0, 15 - Math.min(resourcePenalty, 15));
+
+    const breakdown = [
+      {
+        metric: 'Lighthouse Score', value: 0, maxScore: 25,
+        actualScore: lighthouseActual,
+        penalty: Math.round((25 - lighthouseActual) * 100) / 100,
+        details: `${lighthouseFindings.length} finding(s), ${lighthouseAuditFindings.length} audit(s)`,
+      },
+      {
+        metric: 'Core Web Vitals', value: 0, maxScore: 25,
+        actualScore: cwvActual,
+        penalty: Math.min(cwvPenalty, 25),
+        details: `${cwvFindings.length} finding(s)`,
+      },
+      {
+        metric: 'Player Metrics', value: 0, maxScore: 20,
+        actualScore: playerActual,
+        penalty: Math.min(playerPenalty, 20),
+        details: `${playerFindings.length} finding(s)`,
+      },
+      {
+        metric: 'CDN Efficiency', value: 0, maxScore: 15,
+        actualScore: cdnActual,
+        penalty: Math.min(cdnPenalty, 15),
+        details: `${cdnFindings.length} finding(s)`,
+      },
+      {
+        metric: 'Resource Optimization', value: 0, maxScore: 15,
+        actualScore: resourceActual,
+        penalty: Math.min(resourcePenalty, 15),
+        details: `${resourceFindings.length} finding(s)`,
+      },
+    ];
+
     const rawScore = this.clampScore(breakdown.reduce((sum, b) => sum + b.actualScore, 0));
 
     return {
