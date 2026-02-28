@@ -2,9 +2,10 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Zap, Loader2, AlertCircle } from "lucide-react";
+import { Zap, Loader2, AlertCircle, Eye } from "lucide-react";
 import { login } from "@/lib/api";
-import { useAuthStore } from "@/lib/store";
+import { useAuthStore, useReportStore } from "@/lib/store";
+import { DEMO_USER, DEMO_TOKEN, DEMO_REPORT } from "@/lib/demo-data";
 import type { UserRole } from "@/types/api";
 
 export default function LoginPage() {
@@ -13,6 +14,7 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const { setAuth } = useAuthStore();
+  const { setReport, setTarget } = useReportStore();
   const router = useRouter();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -26,13 +28,22 @@ export default function LoginPage() {
         { id: user.id, email: user.email, name: user.name, role: user.role as UserRole },
         token,
       );
-      // Full page reload so Next.js middleware picks up the new cookie
       window.location.href = "/";
       return;
     } catch (err: any) {
-      setError(err.message || "Authentication failed");
+      setError(err.message || "Authentication failed. Try Demo mode below.");
     }
     setLoading(false);
+  };
+
+  const handleDemoLogin = () => {
+    // Set demo auth (bypasses backend entirely)
+    setAuth(DEMO_USER, DEMO_TOKEN);
+    // Pre-load sample scan report so dashboard shows data
+    setTarget(DEMO_REPORT.target.url || "https://www.watcho.com");
+    setReport(DEMO_REPORT as any);
+    // Navigate to dashboard
+    router.push("/");
   };
 
   return (
@@ -44,7 +55,24 @@ export default function LoginPage() {
             <Zap className="w-6 h-6 text-white" />
           </div>
           <h1 className="text-xl font-bold text-white">VZY Agent Dashboard</h1>
-          <p className="text-sm text-gray-500 mt-1">Sign in to access OTT monitoring</p>
+          <p className="text-sm text-gray-500 mt-1">
+            OTT Website Security, Performance & Code Quality
+          </p>
+        </div>
+
+        {/* Demo Button — prominent for GitHub Pages visitors */}
+        <button
+          onClick={handleDemoLogin}
+          className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-lg bg-gradient-to-r from-brand-500/20 to-cyan-500/20 border border-brand-500/40 text-brand-400 hover:from-brand-500/30 hover:to-cyan-500/30 hover:border-brand-500/60 transition-all font-medium"
+        >
+          <Eye className="w-4 h-4" />
+          View Demo Dashboard
+        </button>
+
+        <div className="flex items-center gap-3">
+          <div className="flex-1 h-px bg-gray-800" />
+          <span className="text-xs text-gray-600">or sign in with backend</span>
+          <div className="flex-1 h-px bg-gray-800" />
         </div>
 
         {/* Form */}
@@ -63,7 +91,7 @@ export default function LoginPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="input"
-              placeholder="you@dishtv.in"
+              placeholder="admin@dishtv.in"
               required
             />
           </div>
@@ -87,7 +115,7 @@ export default function LoginPage() {
         </form>
 
         <p className="text-center text-xs text-gray-600">
-          RBAC Roles: Admin, DevOps, Developer, Executive (view-only)
+          Default: admin@dishtv.in / admin123 &middot; RBAC: Admin, DevOps, Dev, Exec
         </p>
       </div>
     </div>

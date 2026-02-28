@@ -1,8 +1,10 @@
 // ============================================================================
 // API Client - Consumes existing backend REST endpoints
+// Supports Demo Mode for standalone GitHub Pages deployment
 // ============================================================================
 
 import type { ScanReport, AgentType, Platform } from "@/types/api";
+import { isDemoMode, DEMO_REPORT, DEMO_TRENDS, DEMO_TOKEN } from "./demo-data";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL || "/api";
 
@@ -13,6 +15,11 @@ async function request<T>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
+  // Demo mode: return mock data without hitting the backend
+  if (isDemoMode()) {
+    return demoRequest<T>(path, options);
+  }
+
   const token =
     typeof window !== "undefined" ? localStorage.getItem("vzy_token") : null;
 
@@ -31,6 +38,56 @@ async function request<T>(
   }
 
   return res.json();
+}
+
+// ---------------------------------------------------------------------------
+// Demo Mode Router — returns sample data for all API paths
+// ---------------------------------------------------------------------------
+function demoRequest<T>(path: string, _options: RequestInit = {}): T {
+  // Reports
+  if (path.startsWith("/reports/latest")) return DEMO_REPORT as T;
+  if (path.startsWith("/reports/")) return DEMO_REPORT as T;
+  if (path.startsWith("/reports")) return [DEMO_REPORT] as T;
+
+  // Trends
+  if (path.startsWith("/trends")) return DEMO_TRENDS as T;
+
+  // Scans
+  if (path.startsWith("/scans/batch"))
+    return { batchId: "demo_batch", total: 1, scans: [{ url: "https://www.watcho.com", scanId: "demo_scan_001", status: "queued" }] } as T;
+  if (path.startsWith("/scans"))
+    return { status: "queued", scanId: "demo_scan_001" } as T;
+
+  // Config
+  if (path.startsWith("/config"))
+    return {
+      schedule: { cron: "0 2 * * *", timezone: "Asia/Kolkata", enabled: true },
+      thresholds: { overall: 95, security: 90, performance: 95, codeQuality: 85 },
+      notifications: { slack: { enabled: false, channel: "#ott" }, email: { enabled: false, recipients: [] }, jira: { enabled: false, projectKey: "OTT", autoCreate: false } },
+    } as T;
+
+  // Webhooks
+  if (path.startsWith("/webhooks")) return [] as T;
+
+  // Auth
+  if (path.startsWith("/auth/login"))
+    return { token: DEMO_TOKEN, user: { id: "demo", email: "demo@dishtv.in", name: "Demo", role: "admin" } } as T;
+  if (path.startsWith("/auth/users"))
+    return [
+      { id: "1", email: "admin@dishtv.in", name: "Admin User", role: "admin", is_active: true, created_at: new Date().toISOString() },
+      { id: "2", email: "devops@dishtv.in", name: "DevOps Engineer", role: "devops", is_active: true, created_at: new Date().toISOString() },
+    ] as T;
+
+  // Health
+  if (path.startsWith("/health"))
+    return { status: "demo", uptime: 0, timestamp: new Date().toISOString() } as T;
+
+  // Jira
+  if (path.startsWith("/jira"))
+    return { ticketId: "OTT-DEMO", url: "#" } as T;
+
+  // Default
+  return {} as T;
 }
 
 export class ApiError extends Error {

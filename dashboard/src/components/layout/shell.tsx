@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import { Sidebar } from "./sidebar";
 import { Header } from "./header";
-import { useUIStore, useReportStore, useScanStore } from "@/lib/store";
+import { useAuthStore, useUIStore, useReportStore, useScanStore } from "@/lib/store";
 import { getLatestReport } from "@/lib/api";
 import { connect, disconnect, onScanComplete, onScanError } from "@/lib/websocket";
 import { cn } from "@/lib/utils";
@@ -11,6 +12,27 @@ import { cn } from "@/lib/utils";
 export function Shell({ children }: { children: React.ReactNode }) {
   const { sidebarCollapsed } = useUIStore();
   const { target, setReport, setLoading, setError } = useReportStore();
+  const { token } = useAuthStore();
+  const pathname = usePathname();
+  const router = useRouter();
+
+  // Client-side auth guard (middleware doesn't work in static export)
+  const isLoginPage = pathname === "/login";
+  useEffect(() => {
+    if (!token && !isLoginPage) {
+      router.replace("/login");
+    }
+  }, [token, isLoginPage, router]);
+
+  // If on login page, render children directly (no sidebar/header)
+  if (isLoginPage) {
+    return <>{children}</>;
+  }
+
+  // If no token and not on login page, show nothing while redirecting
+  if (!token) {
+    return null;
+  }
 
   // Load latest report when target changes
   useEffect(() => {
