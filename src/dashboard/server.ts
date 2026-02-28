@@ -37,6 +37,9 @@ const JWT_EXPIRES_IN = '24h';
 // ---------------------------------------------------------------------------
 const pg = new Pool({
   connectionString: process.env.DATABASE_URL || 'postgresql://vzy:changeme@localhost:5432/vzy_agent',
+  connectionTimeoutMillis: 5000,   // Fail fast if DB unreachable (prevents server hang)
+  idleTimeoutMillis: 30000,
+  max: 10,
 });
 
 // ---------------------------------------------------------------------------
@@ -424,7 +427,16 @@ app.post('/api/scans', authMiddleware, requireRole('admin', 'devops') as any, as
     return res.status(400).json({ error: 'url or repoPath required' });
   }
 
-  const OrchestratorClass = lazyOrchestrator();
+  let OrchestratorClass: any;
+  try {
+    OrchestratorClass = lazyOrchestrator();
+  } catch (err) {
+    logger.error('Failed to load orchestrator (Puppeteer/Chromium likely missing)', { error: String(err) });
+    return res.status(503).json({
+      error: 'Scan engine unavailable — Chromium/Puppeteer not installed on this host. Scans require a backend with browser support.',
+    });
+  }
+
   const config = OrchestratorClass.createConfig({ url, repoPath, agents, platform });
   res.json({ status: 'queued', scanId: config.id });
 
@@ -467,12 +479,20 @@ app.post('/api/scans/batch', authMiddleware, requireRole('admin', 'devops') as a
     return res.status(400).json({ error: 'Maximum 20 URLs per batch' });
   }
 
+  let OrchestratorClass: any;
+  try {
+    OrchestratorClass = lazyOrchestrator();
+  } catch (err) {
+    logger.error('Failed to load orchestrator for batch scan', { error: String(err) });
+    return res.status(503).json({
+      error: 'Scan engine unavailable — Chromium/Puppeteer not installed on this host.',
+    });
+  }
+
   const batchId = `batch_${Date.now()}`;
 
   // De-duplicate and trim URLs
   const uniqueUrls = [...new Set(urls.map((u: string) => u.trim()).filter(Boolean))];
-
-  const OrchestratorClass = lazyOrchestrator();
 
   // Create configs lazily per URL (avoid sharing state between configs)
   const scanEntries = uniqueUrls.map((url: string) => {
@@ -729,9 +749,16 @@ app.post('/api/jira/create', authMiddleware as any, requireRole('admin', 'devops
   res.json({ ticketId, url: `${process.env.JIRA_HOST || 'https://dishtv.atlassian.net'}/browse/${ticketId}` });
 });
 
-// Health check (public)
-app.get('/api/health', (_req, res) => {
-  res.json({ status: 'ok', uptime: process.uptime(), timestamp: new Date().toISOString() });
+// Health check (public) — always responds so Render doesn't kill the process
+app.get('/api/health', async (_req, res) => {
+  let dbStatus = 'unknown';
+  try {
+    await pg.query('SELECT 1');
+    dbStatus = 'connected';
+  } catch {
+    dbStatus = 'disconnected';
+  }
+  res.json({ status: 'ok', db: dbStatus, uptime: process.uptime(), timestamp: new Date().toISOString() });
 });
 
 // ============================= WEBSOCKET ===================================
@@ -756,22 +783,30 @@ process.on('uncaughtException', (err) => {
 });
 
 async function start() {
+  // Start listening FIRST so health check responds immediately
+  server.listen(PORT, HOST, () => {
+    logger.info(`Dashboard API running on http://${HOST}:${PORT}`);
+    logger.info(`Default admin credentials: admin@dishtv.in / admin123`);
+  });
+
+  // Initialize database in background (don't block server startup)
   try {
-    await initializeAuthDB();
+    const dbTimeout = new Promise<void>((_, reject) =>
+      setTimeout(() => reject(new Error('DB init timeout after 10s')), 10000),
+    );
+    await Promise.race([initializeAuthDB(), dbTimeout]);
   } catch (err) {
     logger.error('DB init failed (will retry on first request)', { error: String(err) });
   }
 
   try {
-    await loadSystemConfig();
+    const configTimeout = new Promise<void>((_, reject) =>
+      setTimeout(() => reject(new Error('Config load timeout')), 5000),
+    );
+    await Promise.race([loadSystemConfig(), configTimeout]);
   } catch (err) {
     logger.error('Config load failed (using defaults)', { error: String(err) });
   }
-
-  server.listen(PORT, HOST, () => {
-    logger.info(`Dashboard API running on http://${HOST}:${PORT}`);
-    logger.info(`Default admin credentials: admin@dishtv.in / admin123`);
-  });
 }
 
 start().catch((err) => {

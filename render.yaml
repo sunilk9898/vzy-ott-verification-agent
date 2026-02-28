@@ -25,6 +25,6 @@ services:
           name: vzy-postgres
           property: connectionString
       - key: CORS_ORIGIN
-        value: https://dashboard-topaz-omega-93.vercel.app
+        value: "*"
       - key: PUPPETEER_SKIP_DOWNLOAD
         value: "true"

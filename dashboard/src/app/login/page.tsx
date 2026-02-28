@@ -2,10 +2,9 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Zap, Loader2, AlertCircle, Eye } from "lucide-react";
+import { Zap, Loader2, AlertCircle } from "lucide-react";
 import { login } from "@/lib/api";
-import { useAuthStore, useReportStore } from "@/lib/store";
-import { DEMO_USER, DEMO_TOKEN } from "@/lib/demo-data";
+import { useAuthStore } from "@/lib/store";
 import type { UserRole } from "@/types/api";
 
 // basePath for navigation — set at build time by next.config.js
@@ -17,7 +16,6 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const { setAuth } = useAuthStore();
-  const router = useRouter();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -34,17 +32,9 @@ export default function LoginPage() {
       window.location.href = (basePath || "") + "/";
       return;
     } catch (err: any) {
-      setError(err.message || "Authentication failed. Try Demo mode below.");
+      setError(err.message || "Authentication failed. Check your credentials.");
     }
     setLoading(false);
-  };
-
-  const handleDemoLogin = () => {
-    // Set demo auth (bypasses backend entirely) — persisted to localStorage
-    setAuth(DEMO_USER, DEMO_TOKEN);
-    // Shell will auto-detect demo mode and load DEMO_REPORT on the dashboard page
-    // Full page reload for reliable navigation with basePath
-    window.location.href = (basePath || "") + "/";
   };
 
   return (
@@ -59,21 +49,6 @@ export default function LoginPage() {
           <p className="text-sm text-gray-500 mt-1">
             OTT Website Security, Performance & Code Quality
           </p>
-        </div>
-
-        {/* Demo Button — prominent for GitHub Pages visitors */}
-        <button
-          onClick={handleDemoLogin}
-          className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-lg bg-gradient-to-r from-brand-500/20 to-cyan-500/20 border border-brand-500/40 text-brand-400 hover:from-brand-500/30 hover:to-cyan-500/30 hover:border-brand-500/60 transition-all font-medium"
-        >
-          <Eye className="w-4 h-4" />
-          View Demo Dashboard
-        </button>
-
-        <div className="flex items-center gap-3">
-          <div className="flex-1 h-px bg-gray-800" />
-          <span className="text-xs text-gray-600">or sign in with backend</span>
-          <div className="flex-1 h-px bg-gray-800" />
         </div>
 
         {/* Form */}

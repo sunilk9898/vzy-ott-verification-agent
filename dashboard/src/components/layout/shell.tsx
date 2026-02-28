@@ -8,7 +8,6 @@ import { useAuthStore, useUIStore, useReportStore, useScanStore } from "@/lib/st
 import { getLatestReport } from "@/lib/api";
 import { connect, disconnect, onScanComplete, onScanError } from "@/lib/websocket";
 import { cn } from "@/lib/utils";
-import { isDemoMode, DEMO_REPORT } from "@/lib/demo-data";
 
 export function Shell({ children }: { children: React.ReactNode }) {
   // ---- ALL hooks MUST be called before any conditional return ----
@@ -36,21 +35,9 @@ export function Shell({ children }: { children: React.ReactNode }) {
     }
   }, [hydrated, token, isLoginPage, router]);
 
-  // Auto-load demo data when in demo mode and no report loaded
-  useEffect(() => {
-    if (!hydrated || isLoginPage || !token) return;
-    if (isDemoMode() && !report) {
-      const demoTarget = DEMO_REPORT.target.url || "https://www.watcho.com";
-      setTarget(demoTarget);
-      setReport(DEMO_REPORT as any);
-    }
-  }, [hydrated, isLoginPage, token, report, setTarget, setReport]);
-
-  // Load latest report when target changes (only when authenticated, skip in demo mode)
+  // Load latest report when target changes (only when authenticated)
   useEffect(() => {
     if (!token || isLoginPage || !target) return;
-    // In demo mode, report is already loaded above — don't re-fetch
-    if (isDemoMode()) return;
     let cancelled = false;
 
     setLoading(true);
@@ -65,10 +52,9 @@ export function Shell({ children }: { children: React.ReactNode }) {
     return () => { cancelled = true; };
   }, [token, isLoginPage, target, setReport, setLoading, setError]);
 
-  // Connect WebSocket on mount (only when authenticated, skip in demo mode)
+  // Connect WebSocket on mount (only when authenticated)
   useEffect(() => {
     if (!token || isLoginPage) return;
-    if (isDemoMode()) return; // no websocket needed in demo mode
 
     const socket = connect();
     const unsubComplete = onScanComplete((data) => {
